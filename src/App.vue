@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue';
-import TheWelcome from './components/TheWelcome.vue';
+import { ref } from 'vue';
 
 type Level = {
     price: string;
@@ -39,7 +38,7 @@ type DeltaData = {
 };
 
 const socket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
-let orderBook: OrderBook = { bids: [], asks: [] };
+const orderBook = ref<OrderBook>({ bids: [], asks: [] });
 let lastSeqNum: number | null = null;
 
 function sortAndTrim(levels: RawLevel[], sort: 'asc' | 'desc'): RawLevel[] {
@@ -90,11 +89,7 @@ function updateLevelsWithDelta(
         }
     }
 
-    const sorted = Array.from(map.entries()).sort(([p1], [p2]) => {
-        return sort === 'desc' ? Number(p2) - Number(p1) : Number(p1) - Number(p2);
-    });
-
-    return sorted.slice(0, 8);
+    return sortAndTrim(Array.from(map.entries()), sort);
 }
 
 function processSnapshot(raw: SnapshotData): OrderBook {
@@ -146,7 +141,7 @@ socket.onmessage = (event: MessageEvent) => {
     if (!data || !data.type) return;
 
     if (data.type === 'snapshot') {
-        orderBook = processSnapshot(raw);
+        orderBook.value = processSnapshot(raw);
         lastSeqNum = data.seqNum;
     }
     if (data.type === 'delta') {
@@ -155,56 +150,123 @@ socket.onmessage = (event: MessageEvent) => {
             return;
         }
 
-        orderBook = applyDelta(orderBook, raw);
+        orderBook.value = applyDelta(orderBook.value, raw);
         lastSeqNum = data.seqNum;
 
-        if (hasCrossedOrderBook(orderBook)) {
+        if (hasCrossedOrderBook(orderBook.value)) {
             resubscribe(socket);
         }
     }
-    console.log(orderBook);
+    console.log(orderBook.value);
 };
 </script>
 
 <template>
-    <header>
-        <img alt="Vue logo" class="logo" src="./assets/logo.svg" width="125" height="125" />
+    <div class="max-w-2xl mx-auto mt-8 p-4 rounded-lg font-mono bg-bg-primary text-text-primary">
+        <h1 class="text-center mb-6 text-2xl font-semibold text-text-primary">
+            Order Book - BTCPFC
+        </h1>
 
-        <div class="wrapper">
-            <HelloWorld msg="You did it!" />
+        <div class="overflow-hidden rounded-lg">
+            <table class="w-full border-collapse text-sm">
+                <thead>
+                    <tr class="bg-gray-800/50">
+                        <th
+                            class="text-left p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                        >
+                            Price (USD)
+                        </th>
+                        <th
+                            class="text-right p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                        >
+                            Size
+                        </th>
+                        <th
+                            class="text-right p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                        >
+                            Total
+                        </th>
+                    </tr>
+                </thead>
+
+                <!-- Sell quotes (asks) -->
+                <tbody>
+                    <tr
+                        v-for="ask in orderBook.asks.slice().reverse()"
+                        :key="ask.price"
+                        class="transition-colors duration-150 relative hover:bg-row-hover bg-bearish-bg"
+                    >
+                        <!-- Progress bar for accumulative total -->
+                        <td class="relative">
+                            <div
+                                class="absolute inset-0 opacity-60 bg-bearish-bg"
+                                :style="{ width: (ask.percent || 0) * 100 + '%' }"
+                            ></div>
+                            <div class="relative z-10 text-left p-2 font-semibold text-bearish">
+                                ${{ parseFloat(ask.price).toLocaleString() }}
+                            </div>
+                        </td>
+                        <td
+                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
+                        >
+                            {{ ask.size }}
+                        </td>
+                        <td
+                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
+                        >
+                            {{ ask.total.toFixed(2) }}
+                        </td>
+                    </tr>
+                </tbody>
+
+                <!-- Separator -->
+                <tbody>
+                    <tr class="bg-gray-800/50 border-t-2 border-b-2 border-gray-600">
+                        <td colspan="3" class="text-center p-3">
+                            <div class="font-semibold text-yellow-400">
+                                <span v-if="orderBook.asks.length && orderBook.bids.length">
+                                    Spread: ${{
+                                        (
+                                            parseFloat(orderBook.asks[0]?.price || '0') -
+                                            parseFloat(orderBook.bids[0]?.price || '0')
+                                        ).toLocaleString()
+                                    }}
+                                </span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+
+                <!-- Buy quotes (bids) -->
+                <tbody>
+                    <tr
+                        v-for="bid in orderBook.bids"
+                        :key="bid.price"
+                        class="transition-colors duration-150 relative hover:bg-row-hover bg-bullish-bg"
+                    >
+                        <!-- Progress bar for accumulative total -->
+                        <td class="relative">
+                            <div
+                                class="absolute inset-0 opacity-60 bg-bullish-bg"
+                                :style="{ width: (bid.percent || 0) * 100 + '%' }"
+                            ></div>
+                            <div class="relative z-10 text-left p-2 font-semibold text-bullish">
+                                ${{ parseFloat(bid.price).toLocaleString() }}
+                            </div>
+                        </td>
+                        <td
+                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
+                        >
+                            {{ bid.size }}
+                        </td>
+                        <td
+                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
+                        >
+                            {{ bid.total.toFixed(2) }}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
-    </header>
-
-    <main>
-        <TheWelcome />
-    </main>
+    </div>
 </template>
-
-<style scoped>
-header {
-    line-height: 1.5;
-}
-
-.logo {
-    display: block;
-    margin: 0 auto 2rem;
-}
-
-@media (min-width: 1024px) {
-    header {
-        display: flex;
-        place-items: center;
-        padding-right: calc(var(--section-gap) / 2);
-    }
-
-    .logo {
-        margin: 0 2rem 0 0;
-    }
-
-    header .wrapper {
-        display: flex;
-        place-items: flex-start;
-        flex-wrap: wrap;
-    }
-}
-</style>

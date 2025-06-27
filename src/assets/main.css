@@ -1,35 +1,23 @@
-@import './base.css';
+@import 'tailwindcss';
 
-#app {
-    max-width: 1280px;
-    margin: 0 auto;
-    padding: 2rem;
-    font-weight: normal;
+@theme {
+    /* 基礎色彩 */
+    --color-bg-primary: #131b29;
+    --color-text-primary: #f0f4f8;
+    --color-text-secondary: #8698aa;
+    --color-row-hover: #1e3059;
+
+    /* 買賣盤色彩 */
+    --color-bullish: #00b15d;
+    --color-bearish: #ff5b5a;
+
+    /* 背景色彩 (半透明) */
+    --color-bullish-bg: rgba(16, 186, 104, 0.12);
+    --color-bearish-bg: rgba(255, 90, 90, 0.12);
+    --color-neutral-bg: rgba(134, 152, 170, 0.12);
 }
 
-a,
-.green {
-    text-decoration: none;
-    color: hsla(160, 100%, 37%, 1);
-    transition: 0.4s;
-    padding: 3px;
-}
-
-@media (hover: hover) {
-    a:hover {
-        background-color: hsla(160, 100%, 37%, 0.2);
-    }
-}
-
-@media (min-width: 1024px) {
-    body {
-        display: flex;
-        place-items: center;
-    }
-
-    #app {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        padding: 0 2rem;
-    }
+body {
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
 }
