@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import OrderBookQuotes from './components/OrderBookQuotes.vue';
 
 type Level = {
     price: string;
@@ -149,8 +150,9 @@ socket.onmessage = (event: MessageEvent) => {
             resubscribe(socket);
             return;
         }
-
-        orderBook.value = applyDelta(orderBook.value, raw);
+        requestIdleCallback(() => {
+            orderBook.value = applyDelta(orderBook.value, raw);
+        });
         lastSeqNum = data.seqNum;
 
         if (hasCrossedOrderBook(orderBook.value)) {
@@ -168,21 +170,21 @@ socket.onmessage = (event: MessageEvent) => {
         </h1>
 
         <div class="overflow-hidden rounded-lg">
-            <table class="w-full border-collapse text-sm">
+            <table class="w-full border-collapse text-sm table-fixed text-center">
                 <thead>
                     <tr class="bg-gray-800/50">
                         <th
-                            class="text-left p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
                         >
                             Price (USD)
                         </th>
                         <th
-                            class="text-right p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
                         >
                             Size
                         </th>
                         <th
-                            class="text-right p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
+                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
                         >
                             Total
                         </th>
@@ -190,34 +192,11 @@ socket.onmessage = (event: MessageEvent) => {
                 </thead>
 
                 <!-- Sell quotes (asks) -->
-                <tbody>
-                    <tr
-                        v-for="ask in orderBook.asks.slice().reverse()"
-                        :key="ask.price"
-                        class="transition-colors duration-150 relative hover:bg-row-hover bg-bearish-bg"
-                    >
-                        <!-- Progress bar for accumulative total -->
-                        <td class="relative">
-                            <div
-                                class="absolute inset-0 opacity-60 bg-bearish-bg"
-                                :style="{ width: (ask.percent || 0) * 100 + '%' }"
-                            ></div>
-                            <div class="relative z-10 text-left p-2 font-semibold text-bearish">
-                                ${{ parseFloat(ask.price).toLocaleString() }}
-                            </div>
-                        </td>
-                        <td
-                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
-                        >
-                            {{ ask.size }}
-                        </td>
-                        <td
-                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
-                        >
-                            {{ ask.total.toFixed(2) }}
-                        </td>
-                    </tr>
-                </tbody>
+                <OrderBookQuotes
+                    v-if="orderBook.asks.length"
+                    :quotes="orderBook.asks"
+                    isAsk
+                ></OrderBookQuotes>
 
                 <!-- Separator -->
                 <tbody>
@@ -238,34 +217,11 @@ socket.onmessage = (event: MessageEvent) => {
                 </tbody>
 
                 <!-- Buy quotes (bids) -->
-                <tbody>
-                    <tr
-                        v-for="bid in orderBook.bids"
-                        :key="bid.price"
-                        class="transition-colors duration-150 relative hover:bg-row-hover bg-bullish-bg"
-                    >
-                        <!-- Progress bar for accumulative total -->
-                        <td class="relative">
-                            <div
-                                class="absolute inset-0 opacity-60 bg-bullish-bg"
-                                :style="{ width: (bid.percent || 0) * 100 + '%' }"
-                            ></div>
-                            <div class="relative z-10 text-left p-2 font-semibold text-bullish">
-                                ${{ parseFloat(bid.price).toLocaleString() }}
-                            </div>
-                        </td>
-                        <td
-                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
-                        >
-                            {{ bid.size }}
-                        </td>
-                        <td
-                            class="text-right p-2 border-b border-gray-700 relative z-10 text-text-primary"
-                        >
-                            {{ bid.total.toFixed(2) }}
-                        </td>
-                    </tr>
-                </tbody>
+                <OrderBookQuotes
+                    v-if="orderBook.bids.length"
+                    :quotes="orderBook.bids"
+                    :isAsk="false"
+                ></OrderBookQuotes>
             </table>
         </div>
     </div>
