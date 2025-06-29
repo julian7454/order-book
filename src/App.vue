@@ -37,10 +37,36 @@ type DeltaData = {
         type: string;
     };
 };
+type HighlightInfo = {
+    newPrice?: boolean;
+    sizeChanged?: 'up' | 'down';
+};
+type HighlightMap = Record<string, HighlightInfo>;
 
 const socket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
 const orderBook = ref<OrderBook>({ bids: [], asks: [] });
 let lastSeqNum: number | null = null;
+
+const bidHighlights = ref<HighlightMap>({});
+const askHighlights = ref<HighlightMap>({});
+
+function detectHighlightChanges(oldLevels: Level[], newLevels: Level[]): HighlightMap {
+    const oldMap = new Map(oldLevels.map((l) => [l.price, Number(l.size)]));
+    const result: HighlightMap = {};
+
+    for (const level of newLevels) {
+        const oldSize = oldMap.get(level.price);
+        if (oldSize === undefined) {
+            result[level.price] = { newPrice: true };
+        } else if (Number(level.size) > oldSize) {
+            result[level.price] = { sizeChanged: 'up' };
+        } else if (Number(level.size) < oldSize) {
+            result[level.price] = { sizeChanged: 'down' };
+        }
+    }
+
+    return result;
+}
 
 function sortAndTrim(levels: RawLevel[], sort: 'asc' | 'desc'): RawLevel[] {
     return levels
@@ -150,9 +176,16 @@ socket.onmessage = (event: MessageEvent) => {
             resubscribe(socket);
             return;
         }
+
+        const newOrderBook: OrderBook = applyDelta(orderBook.value, raw);
+
+        bidHighlights.value = detectHighlightChanges(orderBook.value.bids, newOrderBook.bids);
+        askHighlights.value = detectHighlightChanges(orderBook.value.asks, newOrderBook.asks);
+
         requestIdleCallback(() => {
-            orderBook.value = applyDelta(orderBook.value, raw);
+            orderBook.value = newOrderBook;
         });
+
         lastSeqNum = data.seqNum;
 
         if (hasCrossedOrderBook(orderBook.value)) {
@@ -196,6 +229,7 @@ socket.onmessage = (event: MessageEvent) => {
                     v-if="orderBook.asks.length"
                     :quotes="orderBook.asks"
                     isAsk
+                    :highlights="askHighlights"
                 ></OrderBookQuotes>
 
                 <!-- Separator -->
@@ -221,6 +255,7 @@ socket.onmessage = (event: MessageEvent) => {
                     v-if="orderBook.bids.length"
                     :quotes="orderBook.bids"
                     :isAsk="false"
+                    :highlights="bidHighlights"
                 ></OrderBookQuotes>
             </table>
         </div>
