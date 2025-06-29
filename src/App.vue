@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import OrderBookQuotes from './components/OrderBookQuotes.vue';
 
 type Level = {
@@ -43,12 +43,49 @@ type HighlightInfo = {
 };
 type HighlightMap = Record<string, HighlightInfo>;
 
-const socket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
+const orderBookSocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
+const lastPriceSocket = new WebSocket('wss://ws.btse.com/ws/futures');
+
 const orderBook = ref<OrderBook>({ bids: [], asks: [] });
+const lastPriceClass = computed(() => {
+    if (prevPrice.value === null || lastPrice.value === null) {
+        return {
+            color: 'var(--color-text-primary)',
+            backgroundColor: 'var(--color-neutral-bg)',
+        };
+    }
+    if (lastPrice.value > prevPrice.value) {
+        return {
+            color: 'var(--color-bullish)',
+            backgroundColor: 'var(--color-bullish-bg)',
+        };
+    } else if (lastPrice.value < prevPrice.value) {
+        return {
+            color: 'var(--color-bearish)',
+            backgroundColor: 'var(--color-bearish-bg)',
+        };
+    } else {
+        return {
+            color: 'var(--color-text-primary)',
+            backgroundColor: 'var(--color-neutral-bg)',
+        };
+    }
+});
+
 let lastSeqNum: number | null = null;
 
 const bidHighlights = ref<HighlightMap>({});
 const askHighlights = ref<HighlightMap>({});
+
+const lastPrice = ref<number | null>(null);
+const prevPrice = ref<number | null>(null);
+
+const lastPriceArrow = computed(() => {
+    if (prevPrice.value === null || lastPrice.value === null) return '';
+    if (lastPrice.value > prevPrice.value) return 'arrow_upward';
+    if (lastPrice.value < prevPrice.value) return 'arrow_downward';
+    return '';
+});
 
 function detectHighlightChanges(oldLevels: Level[], newLevels: Level[]): HighlightMap {
     const oldMap = new Map(oldLevels.map((l) => [l.price, Number(l.size)]));
@@ -150,7 +187,7 @@ function resubscribe(socket: WebSocket): void {
     socket.send(JSON.stringify({ op: 'subscribe', args: ['update:BTCPFC'] }));
 }
 
-socket.onopen = () => {
+orderBookSocket.onopen = () => {
     console.log('WebSocket connected');
 
     const payload = {
@@ -158,10 +195,19 @@ socket.onopen = () => {
         args: ['update:BTCPFC'],
     };
 
-    socket.send(JSON.stringify(payload));
+    orderBookSocket.send(JSON.stringify(payload));
 };
 
-socket.onmessage = (event: MessageEvent) => {
+lastPriceSocket.onopen = () => {
+    lastPriceSocket.send(
+        JSON.stringify({
+            op: 'subscribe',
+            args: ['tradeHistoryApi:BTCPFC'],
+        }),
+    );
+};
+
+orderBookSocket.onmessage = (event: MessageEvent) => {
     const raw = JSON.parse(event.data);
     const data = raw.data;
 
@@ -173,7 +219,7 @@ socket.onmessage = (event: MessageEvent) => {
     }
     if (data.type === 'delta') {
         if (data.prevSeqNum !== lastSeqNum) {
-            resubscribe(socket);
+            resubscribe(orderBookSocket);
             return;
         }
 
@@ -189,10 +235,23 @@ socket.onmessage = (event: MessageEvent) => {
         lastSeqNum = data.seqNum;
 
         if (hasCrossedOrderBook(orderBook.value)) {
-            resubscribe(socket);
+            resubscribe(orderBookSocket);
         }
     }
-    console.log(orderBook.value);
+};
+
+lastPriceSocket.onmessage = (event) => {
+    const raw = JSON.parse(event.data);
+    const trades = raw?.data;
+    console.log(raw);
+    if (raw.topic === 'tradeHistoryApi' && Array.isArray(trades) && trades.length > 0) {
+        const newPrice = trades[0].price;
+
+        if (lastPrice.value !== null) {
+            prevPrice.value = lastPrice.value;
+        }
+        lastPrice.value = newPrice;
+    }
 };
 </script>
 
@@ -232,23 +291,32 @@ socket.onmessage = (event: MessageEvent) => {
                     :highlights="askHighlights"
                 ></OrderBookQuotes>
 
-                <!-- Separator -->
-                <tbody>
-                    <tr class="bg-gray-800/50 border-t-2 border-b-2 border-gray-600">
-                        <td colspan="3" class="text-center p-3">
-                            <div class="font-semibold text-yellow-400">
-                                <span v-if="orderBook.asks.length && orderBook.bids.length">
-                                    Spread: ${{
-                                        (
-                                            parseFloat(orderBook.asks[0]?.price || '0') -
-                                            parseFloat(orderBook.bids[0]?.price || '0')
-                                        ).toLocaleString()
-                                    }}
-                                </span>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
+                <!-- Last Price -->
+                <tr class="text-center">
+                    <td colspan="3" class="py-2">
+                        <div
+                            class="inline-block px-3 py-1 rounded transition-colors duration-300"
+                            :style="lastPriceClass"
+                        >
+                            {{ lastPrice?.toLocaleString() }}
+                            <span
+                                v-if="lastPriceArrow"
+                                class="material-icons align-middle ml-1"
+                                :style="{
+                                    color:
+                                        lastPriceArrow === 'arrow_upward'
+                                            ? 'var(--color-bullish)'
+                                            : lastPriceArrow === 'arrow_downward'
+                                              ? 'var(--color-bearish)'
+                                              : 'var(--color-text-primary)',
+                                    fontSize: '1.2em',
+                                }"
+                            >
+                                {{ lastPriceArrow }}
+                            </span>
+                        </div>
+                    </td>
+                </tr>
 
                 <!-- Buy quotes (bids) -->
                 <OrderBookQuotes
