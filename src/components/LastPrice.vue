@@ -21,7 +21,7 @@ lastPriceSocket.onmessage = (event) => {
     const raw = JSON.parse(event.data);
     const trades: TradeHistory[] = raw?.data;
 
-    if (trades.length > 0) {
+    if (trades?.length > 0) {
         const newPrice = trades[0].price;
 
         if (lastPrice.value !== null) {
