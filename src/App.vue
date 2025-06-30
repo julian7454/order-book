@@ -36,6 +36,8 @@ type HighlightMap = Record<string, HighlightInfo>;
 
 const orderBookSocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
 let lastSeqNum: number | null = null;
+let shouldThrottle: boolean | null = false;
+let timer: number | null = null; // eslint-disable-line @typescript-eslint/no-unused-vars
 
 const orderBook = ref<OrderBook>({ bids: [], asks: [] });
 const bidHighlights = ref<HighlightMap>({});
@@ -160,28 +162,45 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
     if (!data) return;
 
     if (data.type === 'snapshot') {
-        orderBook.value = processSnapshot(raw);
+        if (shouldThrottle) {
+            return;
+        }
+        requestAnimationFrame(() => {
+            //console.log('Processing snapshot');
+            orderBook.value = processSnapshot(raw);
+        });
         lastSeqNum = data.seqNum;
     }
     if (data.type === 'delta') {
-        if (data.prevSeqNum !== lastSeqNum) {
+        if (data.prevSeqNum !== lastSeqNum || hasCrossedOrderBook(orderBook.value)) {
             resubscribe(orderBookSocket);
             return;
         }
 
-        const newOrderBook: OrderBook = applyDelta(orderBook.value, raw);
-
-        requestAnimationFrame(() => {
-            bidHighlights.value = detectHighlightChanges(orderBook.value.bids, newOrderBook.bids);
-            askHighlights.value = detectHighlightChanges(orderBook.value.asks, newOrderBook.asks);
-            orderBook.value = newOrderBook;
-        });
-
-        lastSeqNum = data.seqNum;
-
-        if (hasCrossedOrderBook(orderBook.value)) {
-            resubscribe(orderBookSocket);
+        if (shouldThrottle) {
+            return;
         }
+
+        shouldThrottle = true;
+        timer = window.setTimeout(() => {
+            const newOrderBook: OrderBook = applyDelta(orderBook.value, raw);
+            lastSeqNum = data.seqNum;
+
+            //console.log('Applying delta to order book');
+            requestAnimationFrame(() => {
+                bidHighlights.value = detectHighlightChanges(
+                    orderBook.value.bids,
+                    newOrderBook.bids,
+                );
+                askHighlights.value = detectHighlightChanges(
+                    orderBook.value.asks,
+                    newOrderBook.asks,
+                );
+                orderBook.value = newOrderBook;
+                shouldThrottle = false;
+                timer = null;
+            });
+        }, 500);
     }
 };
 </script>
