@@ -75,6 +75,7 @@ const lastPriceClass = computed(() => {
             >
                 {{ lastPrice?.toLocaleString() }}
                 <IconArrowDown
+                    v-if="lastPriceArrowColor"
                     :class="{
                         'rotate-180': lastPriceArrowColor === 'var(--color-bullish)',
                     }"
