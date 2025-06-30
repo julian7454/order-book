@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import OrderBookQuotes from './components/OrderBookQuotes.vue';
-import IconArrowDown from './components/IconArrowDown.vue';
+import LastPrice from './components/LastPrice.vue';
 
 type Level = {
     price: string;
@@ -34,50 +34,12 @@ type HighlightInfo = {
 
 type HighlightMap = Record<string, HighlightInfo>;
 
-type TradeHistory = {
-    price: number;
-};
-
 const orderBookSocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
-const lastPriceSocket = new WebSocket('wss://ws.btse.com/ws/futures');
 let lastSeqNum: number | null = null;
 
 const orderBook = ref<OrderBook>({ bids: [], asks: [] });
 const bidHighlights = ref<HighlightMap>({});
 const askHighlights = ref<HighlightMap>({});
-const lastPrice = ref<number | null>(null);
-const prevPrice = ref<number | null>(null);
-
-const lastPriceArrowColor = computed(() => {
-    if (prevPrice.value === null || lastPrice.value === null) return '';
-    if (lastPrice.value > prevPrice.value) return 'var(--color-bullish)';
-    if (lastPrice.value < prevPrice.value) return 'var(--color-bearish)';
-    return '';
-});
-
-const lastPriceClass = computed(() => {
-    if (prevPrice.value === null || lastPrice.value === null) {
-        return {
-            color: 'var(--color-text-primary)',
-            backgroundColor: 'var(--color-neutral-bg)',
-        };
-    }
-    if (lastPrice.value > prevPrice.value) {
-        return {
-            color: 'var(--color-bullish)',
-            backgroundColor: 'var(--color-bullish-bg)',
-        };
-    } else if (lastPrice.value < prevPrice.value) {
-        return {
-            color: 'var(--color-bearish)',
-            backgroundColor: 'var(--color-bearish-bg)',
-        };
-    }
-    return {
-        color: 'var(--color-text-primary)',
-        backgroundColor: 'var(--color-neutral-bg)',
-    };
-});
 
 function detectHighlightChanges(oldLevels: Level[], newLevels: Level[]): HighlightMap {
     const oldMap = new Map(oldLevels.map((l) => [l.price, Number(l.size)]));
@@ -191,15 +153,6 @@ orderBookSocket.onopen = () => {
     orderBookSocket.send(JSON.stringify(payload));
 };
 
-lastPriceSocket.onopen = () => {
-    lastPriceSocket.send(
-        JSON.stringify({
-            op: 'subscribe',
-            args: ['tradeHistoryApi:BTCPFC'],
-        }),
-    );
-};
-
 orderBookSocket.onmessage = (event: MessageEvent) => {
     const raw: OrderbookData = JSON.parse(event.data);
     const data = raw.data;
@@ -231,22 +184,6 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
         }
     }
 };
-
-lastPriceSocket.onmessage = (event) => {
-    const raw = JSON.parse(event.data);
-    const trades: TradeHistory[] = raw?.data;
-
-    if (trades.length > 0) {
-        const newPrice = trades[0].price;
-
-        if (lastPrice.value !== null) {
-            prevPrice.value = lastPrice.value;
-        }
-        requestAnimationFrame(() => {
-            lastPrice.value = newPrice;
-        });
-    }
-};
 </script>
 
 <template>
@@ -271,37 +208,15 @@ lastPriceSocket.onmessage = (event) => {
                         isAsk
                         :highlights="askHighlights"
                     ></OrderBookQuotes>
-
-                    <!-- Last Price -->
-                    <tr class="text-center">
-                        <td colspan="3" class="py-2">
-                            <p
-                                class="p-3 rounded transition-colors duration-300 flex items-center justify-center gap-1 text-lg font-bold"
-                                :style="lastPriceClass"
-                            >
-                                {{ lastPrice?.toLocaleString() }}
-                                <IconArrowDown
-                                    :class="{
-                                        'rotate-180':
-                                            lastPriceArrowColor === 'var(--color-bullish)',
-                                    }"
-                                    :style="{
-                                        color: lastPriceArrowColor,
-                                        width: '1.2em',
-                                        height: '1.2em',
-                                    }"
-                                />
-                            </p>
-                        </td>
-                    </tr>
+                    <LastPrice />
+                    <!-- Buy quotes (bids) -->
+                    <OrderBookQuotes
+                        v-if="orderBook.bids.length"
+                        :quotes="orderBook.bids"
+                        :isAsk="false"
+                        :highlights="bidHighlights"
+                    ></OrderBookQuotes>
                 </tbody>
-                <!-- Buy quotes (bids) -->
-                <OrderBookQuotes
-                    v-if="orderBook.bids.length"
-                    :quotes="orderBook.bids"
-                    :isAsk="false"
-                    :highlights="bidHighlights"
-                ></OrderBookQuotes>
             </table>
         </div>
     </div>
