@@ -162,20 +162,20 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
     if (!data) return;
 
     if (data.type === 'snapshot') {
-        if (shouldThrottle) {
-            return;
-        }
+        lastSeqNum = data.seqNum;
+
         requestAnimationFrame(() => {
             //console.log('Processing snapshot');
             orderBook.value = processSnapshot(raw);
         });
-        lastSeqNum = data.seqNum;
     }
     if (data.type === 'delta') {
         if (data.prevSeqNum !== lastSeqNum || hasCrossedOrderBook(orderBook.value)) {
             resubscribe(orderBookSocket);
             return;
         }
+
+        lastSeqNum = data.seqNum;
 
         if (shouldThrottle) {
             return;
@@ -184,7 +184,6 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
         shouldThrottle = true;
         timer = window.setTimeout(() => {
             const newOrderBook: OrderBook = applyDelta(orderBook.value, raw);
-            lastSeqNum = data.seqNum;
 
             //console.log('Applying delta to order book');
             requestAnimationFrame(() => {
