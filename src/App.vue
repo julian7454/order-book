@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import OrderBookQuotes from './components/OrderBookQuotes.vue';
+import IconArrowDown from './components/IconArrowDown.vue';
 
 type Level = {
     price: string;
@@ -11,42 +12,49 @@ type Level = {
 
 type RawLevel = [string, string];
 
-type OrderBookLevels = Level[];
-type OrderBookRawLevels = RawLevel[];
-
 type OrderBook = {
-    bids: OrderBookLevels;
-    asks: OrderBookLevels;
+    bids: Level[];
+    asks: Level[];
 };
 
-type SnapshotData = {
+type OrderbookData = {
     data: {
-        bids: OrderBookRawLevels;
-        asks: OrderBookRawLevels;
-        seqNum: number;
-        type: string;
-    };
-};
-
-type DeltaData = {
-    data: {
-        bids: OrderBookRawLevels;
-        asks: OrderBookRawLevels;
+        bids: RawLevel[];
+        asks: RawLevel[];
         seqNum: number;
         prevSeqNum: number;
         type: string;
     };
 };
+
 type HighlightInfo = {
     newPrice?: boolean;
     sizeChanged?: 'up' | 'down';
 };
+
 type HighlightMap = Record<string, HighlightInfo>;
+
+type TradeHistory = {
+    price: number;
+};
 
 const orderBookSocket = new WebSocket('wss://ws.btse.com/ws/oss/futures');
 const lastPriceSocket = new WebSocket('wss://ws.btse.com/ws/futures');
+let lastSeqNum: number | null = null;
 
 const orderBook = ref<OrderBook>({ bids: [], asks: [] });
+const bidHighlights = ref<HighlightMap>({});
+const askHighlights = ref<HighlightMap>({});
+const lastPrice = ref<number | null>(null);
+const prevPrice = ref<number | null>(null);
+
+const lastPriceArrowColor = computed(() => {
+    if (prevPrice.value === null || lastPrice.value === null) return '';
+    if (lastPrice.value > prevPrice.value) return 'var(--color-bullish)';
+    if (lastPrice.value < prevPrice.value) return 'var(--color-bearish)';
+    return '';
+});
+
 const lastPriceClass = computed(() => {
     if (prevPrice.value === null || lastPrice.value === null) {
         return {
@@ -64,27 +72,11 @@ const lastPriceClass = computed(() => {
             color: 'var(--color-bearish)',
             backgroundColor: 'var(--color-bearish-bg)',
         };
-    } else {
-        return {
-            color: 'var(--color-text-primary)',
-            backgroundColor: 'var(--color-neutral-bg)',
-        };
     }
-});
-
-let lastSeqNum: number | null = null;
-
-const bidHighlights = ref<HighlightMap>({});
-const askHighlights = ref<HighlightMap>({});
-
-const lastPrice = ref<number | null>(null);
-const prevPrice = ref<number | null>(null);
-
-const lastPriceArrow = computed(() => {
-    if (prevPrice.value === null || lastPrice.value === null) return '';
-    if (lastPrice.value > prevPrice.value) return 'arrow_upward';
-    if (lastPrice.value < prevPrice.value) return 'arrow_downward';
-    return '';
+    return {
+        color: 'var(--color-text-primary)',
+        backgroundColor: 'var(--color-neutral-bg)',
+    };
 });
 
 function detectHighlightChanges(oldLevels: Level[], newLevels: Level[]): HighlightMap {
@@ -93,11 +85,12 @@ function detectHighlightChanges(oldLevels: Level[], newLevels: Level[]): Highlig
 
     for (const level of newLevels) {
         const oldSize = oldMap.get(level.price);
+        const size = Number(level.size);
         if (oldSize === undefined) {
             result[level.price] = { newPrice: true };
-        } else if (Number(level.size) > oldSize) {
+        } else if (size > oldSize) {
             result[level.price] = { sizeChanged: 'up' };
-        } else if (Number(level.size) < oldSize) {
+        } else if (size < oldSize) {
             result[level.price] = { sizeChanged: 'down' };
         }
     }
@@ -156,14 +149,14 @@ function updateLevelsWithDelta(
     return sortAndTrim(Array.from(map.entries()), sort);
 }
 
-function processSnapshot(raw: SnapshotData): OrderBook {
+function processSnapshot(raw: OrderbookData): OrderBook {
     return {
         bids: addTotalsAndPercents(sortAndTrim(raw.data.bids, 'desc')),
         asks: addTotalsAndPercents(sortAndTrim(raw.data.asks, 'asc')),
     };
 }
 
-function applyDelta(orderBook: OrderBook, raw: DeltaData): OrderBook {
+function applyDelta(orderBook: OrderBook, raw: OrderbookData): OrderBook {
     const { data } = raw;
     const bidsMerged = updateLevelsWithDelta(orderBook.bids, data.bids, 'desc');
     const asksMerged = updateLevelsWithDelta(orderBook.asks, data.asks, 'asc');
@@ -208,10 +201,10 @@ lastPriceSocket.onopen = () => {
 };
 
 orderBookSocket.onmessage = (event: MessageEvent) => {
-    const raw = JSON.parse(event.data);
+    const raw: OrderbookData = JSON.parse(event.data);
     const data = raw.data;
 
-    if (!data || !data.type) return;
+    if (!data) return;
 
     if (data.type === 'snapshot') {
         orderBook.value = processSnapshot(raw);
@@ -225,10 +218,9 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
 
         const newOrderBook: OrderBook = applyDelta(orderBook.value, raw);
 
-        bidHighlights.value = detectHighlightChanges(orderBook.value.bids, newOrderBook.bids);
-        askHighlights.value = detectHighlightChanges(orderBook.value.asks, newOrderBook.asks);
-
-        requestIdleCallback(() => {
+        requestAnimationFrame(() => {
+            bidHighlights.value = detectHighlightChanges(orderBook.value.bids, newOrderBook.bids);
+            askHighlights.value = detectHighlightChanges(orderBook.value.asks, newOrderBook.asks);
             orderBook.value = newOrderBook;
         });
 
@@ -242,82 +234,67 @@ orderBookSocket.onmessage = (event: MessageEvent) => {
 
 lastPriceSocket.onmessage = (event) => {
     const raw = JSON.parse(event.data);
-    const trades = raw?.data;
-    console.log(raw);
-    if (raw.topic === 'tradeHistoryApi' && Array.isArray(trades) && trades.length > 0) {
+    const trades: TradeHistory[] = raw?.data;
+
+    if (trades.length > 0) {
         const newPrice = trades[0].price;
 
         if (lastPrice.value !== null) {
             prevPrice.value = lastPrice.value;
         }
-        lastPrice.value = newPrice;
+        requestAnimationFrame(() => {
+            lastPrice.value = newPrice;
+        });
     }
 };
 </script>
 
 <template>
-    <div class="max-w-2xl mx-auto mt-8 p-4 rounded-lg font-mono bg-bg-primary text-text-primary">
-        <h1 class="text-center mb-6 text-2xl font-semibold text-text-primary">
-            Order Book - BTCPFC
+    <div class="max-w-2xl mx-auto rounded-lg font-mono bg-bg-primary text-text-primary">
+        <h1 class="pl-4 py-2 text-2xl font-semibold text-text-primary border-b-1 border-gray-600">
+            Order Book
         </h1>
-
         <div class="overflow-hidden rounded-lg">
-            <table class="w-full border-collapse text-sm table-fixed text-center">
+            <table class="w-full border-collapse text-sm table-fixed text-right">
                 <thead>
-                    <tr class="bg-gray-800/50">
-                        <th
-                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
-                        >
-                            Price (USD)
-                        </th>
-                        <th
-                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
-                        >
-                            Size
-                        </th>
-                        <th
-                            class="p-3 border-b-2 border-gray-600 font-semibold text-text-secondary"
-                        >
-                            Total
-                        </th>
+                    <tr class="font-semibold text-text-secondary">
+                        <th class="p-3 text-left">Price (USD)</th>
+                        <th class="p-3">Size</th>
+                        <th class="p-3">Total</th>
                     </tr>
                 </thead>
+                <tbody>
+                    <!-- Sell quotes (asks) -->
+                    <OrderBookQuotes
+                        v-if="orderBook.asks.length"
+                        :quotes="orderBook.asks"
+                        isAsk
+                        :highlights="askHighlights"
+                    ></OrderBookQuotes>
 
-                <!-- Sell quotes (asks) -->
-                <OrderBookQuotes
-                    v-if="orderBook.asks.length"
-                    :quotes="orderBook.asks"
-                    isAsk
-                    :highlights="askHighlights"
-                ></OrderBookQuotes>
-
-                <!-- Last Price -->
-                <tr class="text-center">
-                    <td colspan="3" class="py-2">
-                        <div
-                            class="inline-block px-3 py-1 rounded transition-colors duration-300"
-                            :style="lastPriceClass"
-                        >
-                            {{ lastPrice?.toLocaleString() }}
-                            <span
-                                v-if="lastPriceArrow"
-                                class="material-icons align-middle ml-1"
-                                :style="{
-                                    color:
-                                        lastPriceArrow === 'arrow_upward'
-                                            ? 'var(--color-bullish)'
-                                            : lastPriceArrow === 'arrow_downward'
-                                              ? 'var(--color-bearish)'
-                                              : 'var(--color-text-primary)',
-                                    fontSize: '1.2em',
-                                }"
+                    <!-- Last Price -->
+                    <tr class="text-center">
+                        <td colspan="3" class="py-2">
+                            <p
+                                class="p-3 rounded transition-colors duration-300 flex items-center justify-center gap-1 text-lg font-bold"
+                                :style="lastPriceClass"
                             >
-                                {{ lastPriceArrow }}
-                            </span>
-                        </div>
-                    </td>
-                </tr>
-
+                                {{ lastPrice?.toLocaleString() }}
+                                <IconArrowDown
+                                    :class="{
+                                        'rotate-180':
+                                            lastPriceArrowColor === 'var(--color-bullish)',
+                                    }"
+                                    :style="{
+                                        color: lastPriceArrowColor,
+                                        width: '1.2em',
+                                        height: '1.2em',
+                                    }"
+                                />
+                            </p>
+                        </td>
+                    </tr>
+                </tbody>
                 <!-- Buy quotes (bids) -->
                 <OrderBookQuotes
                     v-if="orderBook.bids.length"
